@@ -28,24 +28,36 @@ Dán 1 đoạn trích xuất log tiêu biểu từ file `docs/trace_waterfall.js
 [
   {
     "step": 1,
-    "query": "Hãy đặt lịch tư vấn học vụ cho sinh viên SV2026001 vào 14:00 ngày 15/09/2026 với PGS.TS Nguyễn Văn A.",
+    "query": "Hãy tra cứu thông tin học vụ của sinh viên SV2026001.",
     "action_type": "TOOL_EXECUTION",
-    "tool_name": "schedule_appointment",
+    "thought": "OpenAI quyết định gọi công cụ 'academic_query' với tham số: {\"student_id\": \"SV2026001\"}",
+    "tool_name": "academic_query",
     "arguments": {
-      "datetime_str": "14:00 15/09/2026",
-      "advisor_name": "PGS.TS Nguyễn Văn A",
       "student_id": "SV2026001"
     },
     "observation": {
       "status": "SUCCESS",
-      "booking_id": "BK-SV2026001-99",
       "student_id": "SV2026001",
-      "datetime": "14:00 15/09/2026",
-      "advisor": "PGS.TS Nguyễn Văn A",
-      "message": "Đặt lịch thành công cho sinh viên SV2026001 với PGS.TS Nguyễn Văn A vào lúc 14:00 15/09/2026."
+      "data": {
+        "full_name": "Nguyễn Văn An",
+        "class": "AI-K4",
+        "gpa": 3.85,
+        "email": "an.nv@vinuni.edu.vn",
+        "status": "Đang học",
+        "advisor": "PGS.TS Nguyễn Văn A"
+      }
     },
-    "latency_ms": 1052.6
-  }
+    "latency_ms": 854.02,
+    "tool_latency_ms": 0.0
+  },
+  {
+    "step": 2,
+    "query": "Hãy tra cứu thông tin học vụ của sinh viên SV2026001.",
+    "action_type": "FINAL_ANSWER",
+    "thought": "OpenAI phản hồi trực tiếp bằng văn bản (không cần gọi công cụ).",
+    "output": "Đã tra cứu thành công thông tin học vụ của sinh viên **SV2026001**. Dưới đây là kết quả chi tiết:\n\n- **Họ và tên:** Nguyễn Văn An\n- **Lớp:** AI-K4\n- **GPA:** 3.85\n- **Email:** an.nv@vinuni.edu.vn\n- **Tình trạng học tập:** Đang học\n- **Cố vấn học tập:** PGS.TS Nguyễn Văn A\n\nNếu bạn cần hỗ trợ thêm (ví dụ đặt lịch tư vấn với Cố vấn học tập), hãy cho mình biết nhé!",
+    "latency_ms": 1983.65
+  },
 ]
 ```
 
