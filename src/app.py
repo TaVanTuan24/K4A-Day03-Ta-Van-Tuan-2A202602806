@@ -61,33 +61,75 @@ def run_baseline_chatbot(user_query: str, provider):
     print(f"🤖 Chatbot phản hồi:\n{response}")
 
 
-def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) -> list:
+def run_react_agent(
+    user_query: str,
+    provider,
+    mcp_server: MCPAcademicServer
+) -> list:
     """
-    [REACT AGENT LOOP] Thực thi vòng lặp Thought -> Action -> Observation với MCP Server
-    Trả về danh sách trace log của phiên thực thi.
+    Thực thi ReAct Loop thực sự:
+    Thought -> Action -> Observation -> Thought -> ...
+
+    Agent có thể gọi nhiều Tool liên tiếp trước khi đưa ra Final Answer.
+
+    Trả về danh sách Waterfall Trace Logs.
     """
+
     print(f"\n🤖 [REACT AGENT] Câu hỏi: {user_query}")
-    
+
     step = 0
     trace_logs = []
     tools_list = mcp_server.list_tools()
-    
+
+    # Lưu lịch sử các Action/Observation để đưa lại cho LLM ở vòng sau
+    execution_history = []
+
+    # Prompt ban đầu
+    working_prompt = user_query
+
     while step < MAX_ITERATIONS:
         step += 1
         step_start_time = time.time()
-        print(f"\n--- 🔄 Vòng lặp ReAct Loop (Step {step}/{MAX_ITERATIONS}) ---")
-        
-        # Gọi LLM với Native Tool Calling Specs
-        llm_response = provider.generate_with_tools(user_query, tools_list, system_prompt=REACT_AGENT_SYSTEM_PROMPT)
-        latency_ms = round((time.time() - step_start_time) * 1000, 2)
-        
-        thought = llm_response.get("thought", "Đang suy luận...")
+
+        print(
+            f"\n--- 🔄 Vòng lặp ReAct Loop "
+            f"(Step {step}/{MAX_ITERATIONS}) ---"
+        )
+
+        # ==========================================================
+        # 1. GỌI LLM
+        # ==========================================================
+        llm_response = provider.generate_with_tools(
+            working_prompt,
+            tools_list,
+            system_prompt=REACT_AGENT_SYSTEM_PROMPT
+        )
+
+        latency_ms = round(
+            (time.time() - step_start_time) * 1000,
+            2
+        )
+
+        thought = llm_response.get(
+            "thought",
+            "Đang phân tích bước xử lý tiếp theo..."
+        )
+
         print(f"🧠 [Thought]: {thought}")
-        
-        # Trường hợp 1: LLM quyết định trả lời bằng văn bản trực tiếp
-        if llm_response.get("type") == "text":
-            final_content = llm_response.get("content", "")
+
+        response_type = llm_response.get("type")
+
+        # ==========================================================
+        # 2. LLM TRẢ VỀ FINAL ANSWER
+        # ==========================================================
+        if response_type == "text":
+            final_content = llm_response.get(
+                "content",
+                "Không có nội dung phản hồi."
+            )
+
             print(f"🏁 [Final Answer]: {final_content}")
+
             trace_logs.append({
                 "step": step,
                 "query": user_query,
@@ -96,68 +138,220 @@ def run_react_agent(user_query: str, provider, mcp_server: MCPAcademicServer) ->
                 "output": final_content,
                 "latency_ms": latency_ms
             })
+
             break
-            
-        # Trường hợp 2: LLM đề xuất gọi Tool (Action)
-        elif llm_response.get("type") == "tool_call":
+
+        # ==========================================================
+        # 3. LLM MUỐN GỌI TOOL
+        # ==========================================================
+        elif response_type == "tool_call":
+
             tool_name = llm_response.get("tool_name")
             arguments = llm_response.get("arguments", {})
-            
-            print(f"🛠️ [Action Proposed]: {tool_name}({arguments})")
-            
-            # Thực thi Tool qua MCP Server
-            mcp_result = mcp_server.call_tool(tool_name, arguments)
-            obs_data = mcp_result.get("result", {})
-            
-            if not obs_data:
-                print(f"👁️ [Observation từ MCP Server]: {{}}")
-                print(f"⚠️ [CHÚ Ý]: MCP Server trả về kết quả rỗng! Học viên cần hoàn thành TODO 2.1 trong 'src/mcp_server.py'.")
-                final_answer = "Chưa thể trả lời chi tiết do chưa nhận được dữ liệu từ MCP Server (hãy hoàn thành TODO 2.1)."
-            else:
-                obs_str = json.dumps(obs_data, ensure_ascii=False)
-                print(f"👁️ [Observation từ MCP Server]: {obs_str}")
-                
-                # Tổng hợp Final Answer từ kết quả Observation thực tế
-                if obs_data.get("status") == "SUCCESS":
-                    if "data" in obs_data:
-                        d = obs_data["data"]
-                        final_answer = (
-                            f"Kết quả tra cứu cho sinh viên {obs_data.get('student_id', '')} ({d.get('full_name', '')}): "
-                            f"Lớp {d.get('class', '')}, GPA: {d.get('gpa', '')}, Email: {d.get('email', '')}, "
-                            f"Trạng thái: {d.get('status', '')}, Cố vấn: {d.get('advisor', '')}."
-                        )
-                    elif "message" in obs_data:
-                        final_answer = obs_data["message"]
-                    else:
-                        final_answer = f"Đã hoàn tất xử lý qua MCP Server: {json.dumps(obs_data, ensure_ascii=False)}"
-                elif obs_data.get("status") == "NOT_FOUND":
-                    final_answer = obs_data.get("message", "Không tìm thấy thông tin sinh viên yêu cầu.")
-                else:
-                    final_answer = f"Phản hồi từ công cụ: {json.dumps(obs_data, ensure_ascii=False)}"
-            
+
+            print(
+                f"🛠️ [Action Proposed]: "
+                f"{tool_name}({arguments})"
+            )
+
+            # ------------------------------------------------------
+            # Kiểm tra Tool Call hợp lệ
+            # ------------------------------------------------------
+            if not tool_name:
+                error_message = "LLM không cung cấp tên Tool."
+
+                print(f"⚠️ {error_message}")
+
+                trace_logs.append({
+                    "step": step,
+                    "query": user_query,
+                    "action_type": "ERROR",
+                    "thought": thought,
+                    "output": error_message,
+                    "latency_ms": latency_ms
+                })
+
+                break
+
+            # ------------------------------------------------------
+            # Chống việc Agent gọi lại chính xác Tool đã chạy
+            # ------------------------------------------------------
+            duplicate_call = any(
+                item["tool_name"] == tool_name
+                and item["arguments"] == arguments
+                for item in execution_history
+            )
+
+            if duplicate_call:
+                print(
+                    "⚠️ [DUPLICATE TOOL CALL]: "
+                    "Agent đang cố gọi lại Tool với cùng tham số."
+                )
+
+                working_prompt = f"""
+Yêu cầu ban đầu của người dùng:
+
+{user_query}
+
+Các thao tác đã thực hiện:
+{json.dumps(execution_history, ensure_ascii=False, indent=2)}
+
+Bạn đang định gọi lại chính xác một công cụ đã thực hiện trước đó.
+
+KHÔNG được lặp lại Tool Call cũ.
+
+Hãy xem lại các Observation đã có.
+
+Nếu nhiệm vụ đã hoàn thành:
+- Trả lời người dùng bằng văn bản.
+
+Nếu vẫn còn bước khác chưa hoàn thành:
+- Gọi công cụ tiếp theo phù hợp.
+
+Ví dụ:
+Nếu đã academic_query và đã biết advisor,
+nhưng người dùng còn yêu cầu đặt lịch,
+hãy gọi schedule_appointment.
+"""
+
+                continue
+
+            # ======================================================
+            # 4. THỰC THI TOOL QUA MCP SERVER
+            # ======================================================
+            tool_start_time = time.time()
+
+            try:
+                mcp_result = mcp_server.call_tool(
+                    tool_name,
+                    arguments
+                )
+
+                tool_latency_ms = round(
+                    (time.time() - tool_start_time) * 1000,
+                    2
+                )
+
+                obs_data = mcp_result.get("result", {})
+
+            except Exception as e:
+                tool_latency_ms = round(
+                    (time.time() - tool_start_time) * 1000,
+                    2
+                )
+
+                obs_data = {
+                    "status": "MCP_ERROR",
+                    "error": str(e)
+                }
+
+            obs_str = json.dumps(
+                obs_data,
+                ensure_ascii=False
+            )
+
+            print(
+                f"👁️ [Observation từ MCP Server]: "
+                f"{obs_str}"
+            )
+
+            # ======================================================
+            # 5. GHI WATERFALL TRACE
+            # ======================================================
             trace_logs.append({
                 "step": step,
                 "query": user_query,
                 "action_type": "TOOL_EXECUTION",
+                "thought": thought,
                 "tool_name": tool_name,
                 "arguments": arguments,
                 "observation": obs_data,
+                "latency_ms": latency_ms,
+                "tool_latency_ms": tool_latency_ms
+            })
+
+            # Lưu lịch sử để Agent biết những gì đã làm
+            execution_history.append({
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "observation": obs_data
+            })
+
+            # ======================================================
+            # 6. TẠO CONTEXT CHO VÒNG REACT TIẾP THEO
+            # ======================================================
+
+            working_prompt = f"""
+YÊU CẦU BAN ĐẦU CỦA NGƯỜI DÙNG:
+{user_query}
+
+LỊCH SỬ CÁC ACTION / OBSERVATION ĐÃ THỰC HIỆN:
+{json.dumps(execution_history, ensure_ascii=False, indent=2)}
+
+Bạn đang ở trong một ReAct Loop.
+
+Hãy xem xét yêu cầu ban đầu và các Observation đã có.
+
+QUY TẮC:
+1. Không gọi lại một Tool với cùng tham số nếu Tool đó đã chạy thành công.
+2. Nếu yêu cầu của người dùng còn hành động chưa hoàn thành,
+   hãy gọi Tool tiếp theo.
+3. Nếu đã có đủ dữ liệu và tất cả yêu cầu đã hoàn thành,
+   hãy trả lời người dùng bằng văn bản.
+4. Không được tự bịa dữ liệu ngoài Observation.
+5. Nếu Observation có status NOT_FOUND,
+   hãy thông báo chính xác rằng không tìm thấy dữ liệu.
+6. Nếu vừa tra cứu được tên cố vấn và yêu cầu ban đầu còn yêu cầu đặt lịch,
+   hãy sử dụng tên cố vấn từ Observation để gọi schedule_appointment.
+
+Hãy quyết định bước tiếp theo.
+"""
+
+            # QUAN TRỌNG:
+            # Không break ở đây.
+            # Loop tiếp tục để LLM quyết định Action tiếp theo.
+
+        # ==========================================================
+        # 7. RESPONSE TYPE KHÔNG HỢP LỆ
+        # ==========================================================
+        else:
+            error_message = (
+                f"LLM trả về response type không hợp lệ: "
+                f"{response_type}"
+            )
+
+            print(f"⚠️ [AGENT ERROR]: {error_message}")
+
+            trace_logs.append({
+                "step": step,
+                "query": user_query,
+                "action_type": "ERROR",
+                "thought": thought,
+                "output": error_message,
                 "latency_ms": latency_ms
             })
-            
-            # Kết thúc vòng lặp sau khi hoàn tất Observation và xuất Final Answer
-            print(f"🧠 [Thought]: Đã nhận được dữ liệu từ MCP Server. Tổng hợp kết quả phản hồi.")
-            print(f"🏁 [Final Answer]: {final_answer}")
-            
-            trace_logs.append({
-                "step": step + 1,
-                "query": user_query,
-                "action_type": "FINAL_ANSWER",
-                "thought": "Tổng hợp kết quả từ MCP Server thành công.",
-                "output": final_answer,
-                "latency_ms": 10.0
-            })
+
             break
+
+    # ==============================================================
+    # 8. MAX ITERATIONS
+    # ==============================================================
+    else:
+        final_message = (
+            f"Agent đã đạt giới hạn {MAX_ITERATIONS} bước "
+            "nhưng chưa hoàn tất được yêu cầu."
+        )
+
+        print(f"⚠️ [MAX ITERATIONS]: {final_message}")
+
+        trace_logs.append({
+            "step": step + 1,
+            "query": user_query,
+            "action_type": "MAX_ITERATIONS_REACHED",
+            "thought": "Dừng để tránh vòng lặp vô hạn.",
+            "output": final_message,
+            "latency_ms": 0
+        })
 
     return trace_logs
 
