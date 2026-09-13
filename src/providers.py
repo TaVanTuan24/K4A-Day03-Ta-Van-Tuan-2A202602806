@@ -1,5 +1,5 @@
 """
-🔌 MULTI-PROVIDER LLM ADAPTER (Google Gemini, OpenAI & Offline Mock)
+🔌 MULTI-PROVIDER LLM ADAPTER (Google Gemini, OpenAI, OpenAI-Compatible & Offline Mock)
 Hỗ trợ Native Tool Calling và chuyển đổi linh hoạt qua biến môi trường LLM_PROVIDER.
 """
 
@@ -137,16 +137,24 @@ class GeminiProvider(BaseLLMProvider):
 
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI Provider (Native Tool Calling với OpenAI SDK)"""
-    def __init__(self, api_key: str = None, model: str = None):
+    def __init__(self, api_key: str = None, model: str = None, base_url: str = None):
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.model_name = model or os.getenv("LLM_MODEL") or "gpt-4o-mini"
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL")
+
+    def _client_kwargs(self) -> Dict[str, Any]:
+        """Tạo tham số khởi tạo OpenAI client, tự thêm base_url nếu được cấu hình."""
+        kwargs: Dict[str, Any] = {"api_key": self.api_key}
+        if self.base_url:
+            kwargs["base_url"] = self.base_url
+        return kwargs
 
     def generate(self, prompt: str, system_prompt: str = "") -> str:
         if not self.api_key or self.api_key == "your_openai_api_key_here":
             return "[OpenAI Error]: Chưa cấu hình OPENAI_API_KEY trong file .env! Đang sử dụng chế độ Mock."
         try:
             from openai import OpenAI
-            client = OpenAI(api_key=self.api_key)
+            client = OpenAI(**self._client_kwargs())
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
@@ -163,7 +171,7 @@ class OpenAIProvider(BaseLLMProvider):
 
         try:
             from openai import OpenAI
-            client = OpenAI(api_key=self.api_key)
+            client = OpenAI(**self._client_kwargs())
 
             tools = []
             for tool in tools_schema:
@@ -211,6 +219,35 @@ class OpenAIProvider(BaseLLMProvider):
             return MockOfflineProvider().generate_with_tools(prompt, tools_schema, system_prompt)
 
 
+class OpenAICompatibleProvider(OpenAIProvider):
+    """OpenAI-Compatible Provider — tự cấu hình base_url, model name & api key cho endpoint tùy ý.
+
+    Phù hợp với OpenRouter, Together AI, DeepSeek, Ollama, LM Studio... (mọi endpoint tương thích OpenAI).
+    Cấu hình qua biến môi trường:
+        - OPENAI_COMPATIBLE_BASE_URL (bắt buộc) — Base URL của endpoint OpenAI-compatible.
+        - OPENAI_COMPATIBLE_API_KEY   (bắt buộc) — API Key của nhà cung cấp.
+        - OPENAI_COMPATIBLE_MODEL     — Tên model (mặc định gpt-4o-mini).
+    """
+
+    def __init__(self, api_key: str = None, model: str = None, base_url: str = None):
+        self.api_key = (
+            api_key
+            or os.getenv("OPENAI_COMPATIBLE_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+        )
+        self.model_name = (
+            model
+            or os.getenv("OPENAI_COMPATIBLE_MODEL")
+            or os.getenv("LLM_MODEL")
+            or "gpt-4o-mini"
+        )
+        self.base_url = (
+            base_url
+            or os.getenv("OPENAI_COMPATIBLE_BASE_URL")
+            or os.getenv("OPENAI_BASE_URL")
+        )
+
+
 def get_llm_provider() -> BaseLLMProvider:
     """Factory function khởi tạo Provider theo LLM_PROVIDER env variable"""
     provider_type = os.getenv("LLM_PROVIDER", "gemini").lower()
@@ -226,6 +263,19 @@ def get_llm_provider() -> BaseLLMProvider:
         if key and key != "your_openai_api_key_here":
             return OpenAIProvider()
         else:
+            return MockOfflineProvider()
+    elif provider_type in ("openai-compatible", "openai_compatible", "custom"):
+        key = os.getenv("OPENAI_COMPATIBLE_API_KEY") or os.getenv("OPENAI_API_KEY")
+        base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+        key_placeholders = ("your_openai_api_key_here", "your_openai_compatible_api_key_here")
+        base_url_placeholders = ("your_openai_compatible_base_url_here",)
+        if (
+            key and key not in key_placeholders
+            and base_url and base_url not in base_url_placeholders
+        ):
+            return OpenAICompatibleProvider()
+        else:
+            print("ℹ️ [OpenAI-Compatible Provider]: Chưa cấu hình đủ OPENAI_COMPATIBLE_API_KEY và OPENAI_COMPATIBLE_BASE_URL. Tự động chuyển sang Mock Offline.")
             return MockOfflineProvider()
     elif provider_type == "mock":
         return MockOfflineProvider()

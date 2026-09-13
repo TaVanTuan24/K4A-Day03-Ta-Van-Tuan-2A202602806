@@ -10,10 +10,10 @@
 
 | Tiêu chí Đánh giá | Mức độ (1 - 5) | Giải trình chi tiết lý do chọn điểm |
 | :--- | :---: | :--- |
-| **1. Multi-step Reasoning** | 4 / 5 | Bài toán có yêu cầu chia nhỏ nhiều bước suy luận nối tiếp nhau không? |
-| **2. Tool Interaction** | 5 / 5 | Hệ thống có cần kết nối với MCP Server / Cơ sở dữ liệu bên ngoài không? |
-| **3. Dynamic Decision** | 4 / 5 | Bước tiếp theo có phụ thuộc vào kết quả quan sát bước trước không? |
-| **4. Long Horizon Goal** | 3 / 5 | Hệ thống có phải giữ mục tiêu xuyên suốt qua nhiều lượt xử lý không? |
+| **1. Multi-step Reasoning** | 4 / 5 | Một số yêu cầu cần tra cứu thông tin sinh viên, lấy tên cố vấn rồi mới thực hiện hành động đặt lịch. |
+| **2. Tool Interaction** | 5 / 5 | Agent cần gọi MCP Server để truy vấn dữ liệu học vụ và thực hiện đặt lịch. |
+| **3. Dynamic Decision** | 4 / 5 | Hành động tiếp theo phụ thuộc vào Observation, ví dụ phải xác định cố vấn trước khi đặt lịch. |
+| **4. Long Horizon Goal** | 3 / 5 | Agent phải duy trì mục tiêu qua nhiều bước nhưng workflow chỉ kéo dài khoảng 2–3 action. |
 | **TỔNG ĐIỂM AGENTIC FIT** | 16/ 20 | *Nếu tổng điểm > 12/20: Bài toán rất phù hợp triển khai Agentic System.* |
 
 ---
